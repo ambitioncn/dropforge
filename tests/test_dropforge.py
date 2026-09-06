@@ -13,6 +13,7 @@ from dropforge.adapters.base import AdapterBlocked, AdapterError
 from dropforge.adapters.fallback import BlockedFallbackAdapter
 from dropforge.adapters.openclaw_browser import OpenClawBrowserAdapter, OpenClawBrowserClient
 from dropforge.adapters.shopify import ShopifyAdapter
+from dropforge.adapters.sfcc import SalesforceCommerceCloudCategoryAdapter, products_from_sfcc_category
 from dropforge.config import load_config
 from dropforge.engine import MonitorEngine
 from dropforge.models import DropTarget, MatchRule, Product, Variant
@@ -74,12 +75,19 @@ class ModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MatchRule(title="Any").validate()
 
+    def test_all_products_is_explicit_and_cannot_mix_with_title(self):
+        rule = MatchRule(all_products=True)
+        rule.validate()
+        self.assertTrue(rule.matches_product(PRODUCT))
+        with self.assertRaises(ValueError):
+            MatchRule(title="Cactus Crewneck", all_products=True).validate()
+
 
 class ConfigTests(unittest.TestCase):
     def test_example_config(self):
         path = Path(__file__).parents[1] / "examples" / "drops.toml"
         config = load_config(path)
-        self.assertEqual(len(config.drops), 2)
+        self.assertEqual(len(config.drops), 3)
         self.assertEqual(config.drops[0].match.sizes, ("L",))
 
 
@@ -110,6 +118,52 @@ class ShopifyAdapterTests(unittest.TestCase):
         with patch("dropforge.adapters.shopify.urlopen", side_effect=pages):
             with self.assertRaises(AdapterBlocked):
                 adapter.discover(target())
+
+
+class SalesforceCommerceCloudAdapterTests(unittest.TestCase):
+    MARKUP = """
+    <div class="product productType-master" data-pid="p1">
+      <span class="product-metadata d-none" data-pid="p1"
+        data-name="NEW CROSS SOCKS" data-price="$255.00"></span>
+      <a class="pdp-link-image" href="/socks/new-cross/p1.html"></a>
+    </div>
+    <div class="product productType-master" data-pid="p2">
+      <span class="product-metadata d-none" data-pid="p2"
+        data-name="OLD SOCKS" data-price=""></span>
+      <a class="pdp-link-image" href="/socks/old/p2.html"></a>
+      <a class="plp-price" aria-label="price-$1,200-$1,400-OLD SOCKS"></a>
+      <a class="soldout">OUT OF STOCK</a>
+    </div>
+    """
+
+    def test_category_tiles_are_normalized_with_stock_state(self):
+        products = products_from_sfcc_category(self.MARKUP, "https://www.chromehearts.com/socks")
+        self.assertEqual([item.id for item in products], ["p1", "p2"])
+        self.assertEqual(products[0].title, "NEW CROSS SOCKS")
+        self.assertEqual(products[0].url, "https://www.chromehearts.com/socks/new-cross/p1.html")
+        self.assertEqual(products[0].variants[0].price_cents, 25500)
+        self.assertTrue(products[0].variants[0].available)
+        self.assertEqual(products[1].variants[0].price_cents, 120000)
+        self.assertFalse(products[1].variants[0].available)
+
+    def test_empty_category_is_reported_as_blocked(self):
+        adapter = SalesforceCommerceCloudCategoryAdapter()
+        with patch.object(adapter, "_html", return_value="<html></html>"):
+            with self.assertRaises(AdapterBlocked):
+                adapter.discover(target())
+
+    def test_single_product_navigation_page_is_supported(self):
+        markup = """
+        <div class="container product-detail" data-pid="scarf1">
+          <span class="product-metadata d-none" data-pid="scarf1"
+            data-name="DOUBLE PEONY SCARF" data-price="1100.00"></span>
+          <button class="add-to-cart" data-pid="scarf1">Add to Bag</button>
+        </div>
+        """
+        products = products_from_sfcc_category(markup, "https://www.chromehearts.com/scarf")
+        self.assertEqual(products[0].title, "DOUBLE PEONY SCARF")
+        self.assertEqual(products[0].variants[0].price_cents, 110000)
+        self.assertTrue(products[0].variants[0].available)
 
 
 class BrowserAdapterTests(unittest.TestCase):

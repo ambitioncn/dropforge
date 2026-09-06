@@ -27,12 +27,19 @@ under the operator's `.local/state/dropforge` directory.
 Every target needs a unique `id`, HTTPS `store`, non-empty query, and polling
 interval of at least five seconds. `adapter = "shopify"` uses only public
 endpoints. `adapter = "shopify_browser"` permits the bounded read-only browser
-fallback only for HTTP 401, 403, or 429 blocking.
+fallback only for HTTP 401, 403, or 429 blocking. `adapter = "sfcc_category"`
+reads public Salesforce Commerce Cloud category product tiles and treats
+401/403/429 responses as blocked.
 
 Prefer `match.title` for exact title matching. `match.sizes` and
 `match.max_unit_price_cents` further narrow candidates. `Any`, blank filters,
 non-positive prices, and ambiguous variants are rejected. Configuration price
 values are integer minor currency units, not floating-point amounts.
+
+For catalog-change monitoring only, `match.all_products = true` explicitly
+matches every available product in the category. It cannot be combined with
+title filters and does not weaken the guarded checkout executor's exact intent
+requirements.
 
 Runtime `start` and `stop` overrides are stored in SQLite and take precedence
 over the configured `enabled` default until changed again.

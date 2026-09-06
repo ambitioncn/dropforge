@@ -12,6 +12,7 @@ from .adapters import (
     OpenClawBrowserAdapter,
     OpenClawBrowserClient,
     ShopifyAdapter,
+    SalesforceCommerceCloudCategoryAdapter,
 )
 from .config import Config, load_config
 from .controls import TargetController
@@ -71,9 +72,14 @@ def make_engine(config: Config, state: StateStore, *, emit_changes: bool) -> Mon
         profile=config.service.browser_profile,
         timeout=config.service.browser_timeout_seconds,
     ))
+    sfcc = SalesforceCommerceCloudCategoryAdapter(
+        timeout=config.service.request_timeout_seconds,
+        user_agent=config.service.user_agent,
+    )
     adapters = {
         "shopify": shopify,
         "shopify_browser": BlockedFallbackAdapter(shopify, browser),
+        "sfcc_category": sfcc,
     }
     return MonitorEngine(
         adapters=adapters,

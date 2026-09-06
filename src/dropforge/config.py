@@ -90,6 +90,7 @@ def load_config(path: Path) -> Config:
             match=MatchRule(
                 title=match_raw.get("title"),
                 title_contains=_tuple(match_raw.get("title_contains")),
+                all_products=bool(match_raw.get("all_products", False)),
                 sizes=_tuple(match_raw.get("sizes")),
                 max_unit_price_cents=(
                     int(match_raw["max_unit_price_cents"])

@@ -38,12 +38,15 @@ class Product:
 class MatchRule:
     title: str | None = None
     title_contains: tuple[str, ...] = ()
+    all_products: bool = False
     sizes: tuple[str, ...] = ()
     max_unit_price_cents: int | None = None
 
     def validate(self) -> None:
-        if not self.title and not self.title_contains:
+        if not self.title and not self.title_contains and not self.all_products:
             raise ValueError("match requires title or title_contains")
+        if self.all_products and (self.title or self.title_contains):
+            raise ValueError("all_products cannot be combined with title filters")
         if self.title and normalize(self.title) in {"any", "all", ""}:
             raise ValueError("exact title cannot be Any/All")
         if any(normalize(size) in {"any", "all", ""} for size in self.sizes):
@@ -52,6 +55,8 @@ class MatchRule:
             raise ValueError("max_unit_price_cents must be positive")
 
     def matches_product(self, product: Product) -> bool:
+        if self.all_products:
+            return True
         title = normalize(product.title)
         if self.title and title != normalize(self.title):
             return False

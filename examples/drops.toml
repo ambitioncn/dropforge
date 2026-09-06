@@ -35,3 +35,14 @@ enabled = false
 title_contains = ["example", "shoe"]
 sizes = ["US 9", "US 9.5"]
 max_unit_price_cents = 25000
+
+[[drops]]
+id = "example-sfcc-category"
+adapter = "sfcc_category"
+store = "https://www.chromehearts.com/socks"
+query = "official online catalog"
+interval_seconds = 60
+enabled = false
+
+[drops.match]
+all_products = true

@@ -11,6 +11,11 @@ in an OpenClaw managed browser only when access is blocked. CAPTCHA, queue and
 password pages remain `blocked`; the adapter never clicks, logs in or mutates a
 cart.
 
+The `sfcc_category` adapter monitors public Salesforce Commerce Cloud category
+pages, including explicit catalog-wide change detection with
+`match.all_products = true`. Access limits remain `blocked`, and this read-only
+mode never performs cart or checkout actions.
+
 ## Features
 
 - **Multiple drops:** each target has its own store, rule and poll interval;
@@ -176,7 +181,7 @@ created -> cart_verified -> checkout_ready -> submitting -> order_confirmed
 
 ## Roadmap
 
-- Generic JSON, WooCommerce, and retailer-specific public API adapters.
+- Generic JSON, WooCommerce, and additional retailer-specific public API adapters.
 - Metrics and additional notification sinks.
 
 ## Development
