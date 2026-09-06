@@ -1,0 +1,30 @@
+[service]
+state_path = "../.dropforge/state.db"
+max_concurrency = 8
+request_timeout_seconds = 12
+user_agent = "DropForge/0.1 (operator@example.com)"
+
+[[drops]]
+id = "travis-varsity-crewneck"
+adapter = "shopify"
+store = "https://shop.travisscott.com"
+query = "cactus court varsity crewneck"
+interval_seconds = 15
+
+[drops.match]
+title = "CJ X NIKE CACTUS COURT VARSITY CREWNECK"
+sizes = ["L"]
+max_unit_price_cents = 15000
+
+[[drops]]
+id = "example-shoe"
+adapter = "shopify"
+store = "https://example.myshopify.com"
+query = "example shoe"
+interval_seconds = 20
+enabled = false
+
+[drops.match]
+title_contains = ["example", "shoe"]
+sizes = ["US 9", "US 9.5"]
+max_unit_price_cents = 25000

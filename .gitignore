@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.dropforge/
+dist/
+build/
+*.db
+*.db-shm
+*.db-wal
+secrets.toml
