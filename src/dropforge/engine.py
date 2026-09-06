@@ -52,14 +52,20 @@ class MonitorEngine:
                 except Exception as exc:
                     observation = Observation(target.id, "error", checked_at, detail=type(exc).__name__)
             if self.state.record(observation) and self.on_change:
-                self.on_change(observation)
+                await asyncio.to_thread(self.on_change, observation)
             return observation
 
     async def once(self, targets: tuple[DropTarget, ...]) -> list[Observation]:
-        return list(await asyncio.gather(*(self.check(t) for t in targets if t.enabled)))
+        return list(await asyncio.gather(*(
+            self.check(t) for t in targets
+            if self.state.target_enabled(t.id, default=t.enabled)
+        )))
 
     async def watch_target(self, target: DropTarget) -> None:
         while True:
+            if not self.state.target_enabled(target.id, default=target.enabled):
+                await asyncio.sleep(min(1.0, target.interval_seconds))
+                continue
             started = time.monotonic()
             await self.check(target)
             elapsed = time.monotonic() - started
@@ -67,4 +73,4 @@ class MonitorEngine:
             await asyncio.sleep(max(0.1, target.interval_seconds - elapsed + jitter))
 
     async def watch(self, targets: tuple[DropTarget, ...]) -> None:
-        await asyncio.gather(*(self.watch_target(t) for t in targets if t.enabled))
+        await asyncio.gather(*(self.watch_target(t) for t in targets))

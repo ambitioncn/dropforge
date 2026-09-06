@@ -3,10 +3,17 @@ state_path = "../.dropforge/state.db"
 max_concurrency = 8
 request_timeout_seconds = 12
 user_agent = "DropForge/0.1 (operator@example.com)"
+browser_profile = "openclaw"
+browser_timeout_seconds = 30
+# Optional protected-secret reference; the webhook URL itself does not belong in TOML.
+# feishu_webhook_env = "DROP_FORGE_FEISHU_WEBHOOK"
+# feishu_timeout_seconds = 10
+dashboard_host = "127.0.0.1"
+dashboard_port = 8765
 
 [[drops]]
 id = "travis-varsity-crewneck"
-adapter = "shopify"
+adapter = "shopify_browser"
 store = "https://shop.travisscott.com"
 query = "cactus court varsity crewneck"
 interval_seconds = 15

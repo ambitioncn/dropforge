@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+.dropforge
+**/__pycache__
+**/*.py[cod]
+*.db*
+build
+dist
+deploy/container/drops.toml
+deploy/systemd/environment
+runtime

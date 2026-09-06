@@ -9,3 +9,5 @@ build/
 *.db-shm
 *.db-wal
 secrets.toml
+deploy/container/drops.toml
+deploy/systemd/environment

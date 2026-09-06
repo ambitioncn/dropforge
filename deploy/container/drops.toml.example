@@ -1,0 +1,19 @@
+[service]
+state_path = "/data/state.db"
+max_concurrency = 8
+request_timeout_seconds = 12
+dashboard_host = "127.0.0.1"
+dashboard_port = 8765
+
+[[drops]]
+id = "replace-me"
+adapter = "shopify"
+store = "https://shop.example.com"
+query = "exact product title"
+interval_seconds = 15
+enabled = false
+
+[drops.match]
+title = "EXACT PRODUCT TITLE"
+sizes = ["L"]
+max_unit_price_cents = 15000

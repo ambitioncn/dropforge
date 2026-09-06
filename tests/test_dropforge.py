@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import io
+import json
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import patch
-from urllib.error import HTTPError
 
-from dropforge.adapters.base import AdapterBlocked
+from dropforge.adapters.base import AdapterBlocked, AdapterError
+from dropforge.adapters.fallback import BlockedFallbackAdapter
+from dropforge.adapters.openclaw_browser import OpenClawBrowserAdapter, OpenClawBrowserClient
 from dropforge.adapters.shopify import ShopifyAdapter
 from dropforge.config import load_config
 from dropforge.engine import MonitorEngine
@@ -46,6 +50,14 @@ class FakeAdapter:
     def discover(self, _target):
         time.sleep(self.delay)
         return self.products
+
+
+class RaisingAdapter:
+    def __init__(self, error):
+        self.error = error
+
+    def discover(self, _target):
+        raise self.error
 
 
 class ModelTests(unittest.TestCase):
@@ -91,6 +103,72 @@ class ShopifyAdapterTests(unittest.TestCase):
         with patch.object(adapter, "_json", side_effect=AdapterBlocked("HTTP 403")):
             with self.assertRaises(AdapterBlocked):
                 adapter.discover(target())
+
+    def test_non_json_access_page_requires_browser(self):
+        adapter = ShopifyAdapter()
+        pages = [io.StringIO("challenge"), io.StringIO("challenge")]
+        with patch("dropforge.adapters.shopify.urlopen", side_effect=pages):
+            with self.assertRaises(AdapterBlocked):
+                adapter.discover(target())
+
+
+class BrowserAdapterTests(unittest.TestCase):
+    def test_browser_payload_is_normalized_and_owned_tab_is_closed(self):
+        calls = []
+
+        def runner(args, _timeout):
+            calls.append(args)
+            if "evaluate" in args:
+                payload = {"result": {"value": {
+                    "dropforgeVersion": 1,
+                    "status": "ok",
+                    "products": [{
+                        "id": 10,
+                        "title": "Cactus Crewneck",
+                        "handle": "cactus-crewneck",
+                        "variants": [{
+                            "id": 11,
+                            "title": "L",
+                            "available": True,
+                            "price": "135.00",
+                        }],
+                    }],
+                }}}
+                return CompletedProcess(args, 0, stdout=json.dumps(payload), stderr="")
+            return CompletedProcess(args, 0, stdout="{}", stderr="")
+
+        client = OpenClawBrowserClient(profile="test-profile", runner=runner)
+        products = OpenClawBrowserAdapter(client).discover(target())
+        self.assertEqual(products[0].variants[0].price_cents, 13500)
+        self.assertIn("open", calls[0])
+        self.assertIn("evaluate", calls[1])
+        self.assertIn("close", calls[2])
+        self.assertIn("--browser-profile", calls[0])
+        self.assertEqual(calls[1][calls[1].index("--target-id") + 1], calls[2][-1])
+
+    def test_browser_challenge_is_reported_as_blocked(self):
+        class Client:
+            def discover(self, _store, _label):
+                return {"dropforgeVersion": 1, "status": "blocked", "reason": "challenge"}
+
+        with self.assertRaises(AdapterBlocked):
+            OpenClawBrowserAdapter(Client()).discover(target())
+
+    def test_cli_failure_does_not_expose_command_output(self):
+        def runner(args, _timeout):
+            return CompletedProcess(args, 1, stdout='{"token":"private"}', stderr="private")
+
+        client = OpenClawBrowserClient(runner=runner)
+        with self.assertRaisesRegex(AdapterError, "exit 1") as caught:
+            client.discover("https://shop.example.com", "owned-tab")
+        self.assertNotIn("private", str(caught.exception))
+
+    def test_fallback_runs_only_for_blocked_primary(self):
+        fallback = FakeAdapter([PRODUCT])
+        adapter = BlockedFallbackAdapter(RaisingAdapter(AdapterBlocked("403")), fallback)
+        self.assertEqual(adapter.discover(target()), [PRODUCT])
+        with self.assertRaises(AdapterError):
+            BlockedFallbackAdapter(RaisingAdapter(AdapterError("timeout")), fallback).discover(target())
 
 
 class EngineTests(unittest.IsolatedAsyncioTestCase):

@@ -1,0 +1,20 @@
+services:
+  dropforge:
+    build:
+      context: .
+    image: dropforge:local
+    command: ["--config", "/config/drops.toml", "dashboard", "--host", "127.0.0.1"]
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - ./deploy/container/drops.toml:/config/drops.toml:ro
+      - dropforge-state:/data
+
+volumes:
+  dropforge-state:

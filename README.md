@@ -5,11 +5,11 @@ targets concurrently, applies explicit product/variant/price rules, records
 state transitions in SQLite, and emits public JSON events that a notification
 or checkout worker can consume.
 
-The first adapter supports public Shopify discovery endpoints. The core is
-provider-neutral: add an adapter without changing the scheduler or state store.
-Stores that deny public JSON discovery are reported as `blocked`; they can be
-handled by the planned same-session browser adapter without pretending the site
-is out of stock.
+The Shopify adapter supports public discovery endpoints. Targets configured as
+`shopify_browser` first use those endpoints, then fall back on a temporary tab
+in an OpenClaw managed browser only when access is blocked. CAPTCHA, queue and
+password pages remain `blocked`; the adapter never clicks, logs in or mutates a
+cart.
 
 ## Features
 
@@ -18,8 +18,12 @@ is out of stock.
 - **No noisy alerts:** SQLite stores observation digests and emits only changes.
 - **Safe matching:** exact titles/sizes and price ceilings; `Any` is rejected.
 - **Auditable:** the MVP uses only the Python standard library.
-- **Human verification:** CAPTCHA, queue, login, 3DS and payment live outside the
-  monitor. A browser executor should pause and hand the same session to a human.
+- **Guarded checkout:** exact cart and final totals, a private idempotency
+  ledger, expiring one-use authorization, and unknown-result reconciliation.
+- **Human verification:** CAPTCHA, login and 3DS pause the executor and preserve
+  the same named OpenClaw browser tab for takeover.
+- **Operations:** transition-only Feishu notifications, persistent task
+  start/stop controls, and a dashboard that can bind only to loopback.
 
 ## Quick start
 
@@ -33,12 +37,50 @@ dropforge --config drops.toml once
 dropforge --config drops.toml watch
 ```
 
+Python 3.11 through 3.14 are supported. See the focused guides for
+[installation](docs/installation.md), [configuration](docs/configuration.md),
+[operations and deployment](docs/operations.md), [security](docs/security.md),
+[browser handoff](docs/browser-handoff.md), and [releases](docs/release.md).
+
 JSON is printed only when a target changes between `available`, `unavailable`,
 `blocked`, and `error`. Query recent transitions with:
 
 ```bash
 dropforge --config drops.toml events --limit 20
 ```
+
+## Operations and Feishu
+
+Runtime target controls are persisted in the same SQLite database. They affect
+`once`, `watch`, and the dashboard and survive process restarts:
+
+```bash
+dropforge --config drops.toml status
+dropforge --config drops.toml stop unique-target
+dropforge --config drops.toml start unique-target
+dropforge --config drops.toml dashboard
+```
+
+The dashboard monitors targets while serving status and start/stop controls at
+`http://127.0.0.1:8765`. Both configuration and runtime validation reject
+non-loopback bind addresses. It is a local operator surface, not an
+Internet-facing service; use an authenticated local tunnel rather than changing
+the bind address.
+
+To notify a Feishu custom bot on deduplicated state transitions, configure only
+the name of a protected environment entry:
+
+```toml
+[service]
+feishu_webhook_env = "DROP_FORGE_FEISHU_WEBHOOK"
+feishu_timeout_seconds = 10
+```
+
+The referenced value must be an HTTPS custom-bot URL on `open.feishu.cn` or
+`open.larksuite.com`. Never put that URL in TOML, source, command arguments, or
+logs. If delivery fails, monitoring continues and emits a sanitized local error;
+the webhook URL and response body are never printed. No Feishu message is sent
+by `validate`, `status`, `events`, `start`, `stop`, or `once`.
 
 ## Configuration
 
@@ -59,14 +101,33 @@ max_unit_price_cents = 15000
 Use `title_contains` only when a site's title is unstable. Poll intervals under
 five seconds are rejected to avoid abusive traffic.
 
+For a store whose public JSON endpoints return 401, 403 or 429, select the
+explicit browser fallback and (optionally) a managed OpenClaw profile:
+
+```toml
+[service]
+browser_profile = "openclaw"
+browser_timeout_seconds = 30
+
+[[drops]]
+adapter = "shopify_browser"
+```
+
+The fallback opens the storefront read-only, requests `/products.json` inside
+that same browser origin, and closes only the tab it created. It reports
+CAPTCHA, queue, storefront-password and rate-limit responses honestly. It does
+not solve or bypass them. `browser.evaluateEnabled` must be enabled in OpenClaw.
+
 ## Architecture
 
 ```text
-drops.toml -> MonitorEngine -> Adapter registry -> public store endpoints
+drops.toml -> MonitorEngine -> Adapter registry -> public endpoint
+                    |                              -> OpenClaw browser fallback
                     |
                     +-> matching + price policy
                     +-> SQLite transition state
-                    +-> JSON event sink -> notifier / guarded browser executor
+                    +-> JSON + Feishu sinks -> operator / guarded checkout
+                    +-> SQLite controls <- CLI / loopback dashboard
 ```
 
 Adapters are read-only discovery components implementing
@@ -74,6 +135,35 @@ Adapters are read-only discovery components implementing
 separate process boundary. It must re-check the exact cart and final total,
 require explicit authorization, use an idempotency ledger, and stop for
 CAPTCHA/3DS.
+
+## Guarded checkout API
+
+`GuardedCheckoutExecutor` consumes an immutable `PurchaseIntent`, a private
+`CheckoutLedger`, and a checkout driver. `OpenClawCheckoutDriver` prepares an
+exact cart in a named managed-browser tab, navigates to checkout, and leaves the
+tab open for human entry or challenge completion. DropForge never accepts or
+stores shipping or payment secrets.
+
+Calling `prepare()` deliberately clears and replaces the cart in that named
+browser session; it never submits an order. Operators should use a dedicated
+OpenClaw profile when they need to preserve an unrelated shopping cart.
+
+Submission requires a short-lived `PurchaseAuthorization` bound to the exact
+intent, explicit ISO currency, and verified final total. The authorization is
+consumed before the pay control is clicked. A timeout or ambiguous page becomes
+`result_unknown`; that state can only be reconciled and cannot be submitted
+again.
+
+State flow:
+
+```text
+created -> cart_verified -> checkout_ready -> submitting -> order_confirmed
+              |                  |               |-------> payment_failed
+              +------------------+---------------> manual_auth_required
+                                                  +-------> result_unknown
+                                                            |
+                                                            +-> reconcile only
+```
 
 ## Security and responsible use
 
@@ -86,16 +176,19 @@ CAPTCHA/3DS.
 
 ## Roadmap
 
-- Guarded OpenClaw/Playwright browser executor with same-session human handoff.
-- Notification sinks using protected secret references.
 - Generic JSON, WooCommerce, and retailer-specific public API adapters.
-- Long-running service packaging, metrics, dashboard, and container image.
+- Metrics and additional notification sinks.
 
 ## Development
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
 python -m compileall -q src tests
+ruff check src tests
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for adapter rules.
+
+Before publishing, work through the
+[public-release readiness review](docs/public-release-readiness.md). Preparing
+an artifact is not permission to push, publish, or deploy it.

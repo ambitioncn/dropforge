@@ -1,0 +1,27 @@
+[Unit]
+Description=DropForge monitor and loopback dashboard
+Documentation=https://github.com/OWNER/dropforge/blob/main/docs/operations.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+UMask=0077
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-%h/.config/dropforge/environment
+ExecStartPre=%h/.local/share/dropforge/venv/bin/dropforge --config %h/.config/dropforge/drops.toml validate
+ExecStart=%h/.local/share/dropforge/venv/bin/dropforge --config %h/.config/dropforge/drops.toml dashboard --host 127.0.0.1
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/dropforge
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target

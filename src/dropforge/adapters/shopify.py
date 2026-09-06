@@ -16,6 +16,32 @@ def _price_cents(value: Any) -> int:
     return round(float(str(value or "0").replace(",", "").strip()) * 100)
 
 
+def product_from_shopify(raw: dict[str, Any], store: str) -> Product:
+    """Normalize a Shopify product returned by either discovery transport."""
+    handle = str(raw.get("handle", ""))
+    variants = []
+    for item in raw.get("variants", []) or []:
+        options = tuple(
+            str(item[key]) for key in ("option1", "option2", "option3") if item.get(key)
+        )
+        variants.append(
+            Variant(
+                id=str(item.get("id", "")),
+                title=str(item.get("title", "")),
+                available=item.get("available") is True,
+                price_cents=_price_cents(item.get("price", raw.get("price", 0))),
+                options=options,
+            )
+        )
+    return Product(
+        id=str(raw.get("id", handle)),
+        title=str(raw.get("title", "")),
+        handle=handle,
+        url=f"{store}/products/{handle}",
+        variants=tuple(variants),
+    )
+
+
 class ShopifyAdapter:
     """Read-only Shopify discovery using documented public storefront data."""
 
@@ -32,32 +58,13 @@ class ShopifyAdapter:
             if exc.code in {401, 403, 429}:
                 raise AdapterBlocked(f"Shopify returned HTTP {exc.code}") from exc
             raise AdapterError(f"Shopify returned HTTP {exc.code}") from exc
-        except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except json.JSONDecodeError as exc:
+            raise AdapterBlocked("Shopify returned a non-JSON access page") from exc
+        except (URLError, TimeoutError) as exc:
             raise AdapterError(type(exc).__name__) from exc
 
     def _product(self, raw: dict[str, Any], store: str) -> Product:
-        handle = str(raw.get("handle", ""))
-        variants = []
-        for item in raw.get("variants", []) or []:
-            options = tuple(
-                str(item[key]) for key in ("option1", "option2", "option3") if item.get(key)
-            )
-            variants.append(
-                Variant(
-                    id=str(item.get("id", "")),
-                    title=str(item.get("title", "")),
-                    available=item.get("available") is True,
-                    price_cents=_price_cents(item.get("price", raw.get("price", 0))),
-                    options=options,
-                )
-            )
-        return Product(
-            id=str(raw.get("id", handle)),
-            title=str(raw.get("title", "")),
-            handle=handle,
-            url=f"{store}/products/{handle}",
-            variants=tuple(variants),
-        )
+        return product_from_shopify(raw, store)
 
     def discover(self, target: DropTarget) -> list[Product]:
         errors: list[Exception] = []

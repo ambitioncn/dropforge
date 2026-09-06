@@ -1,4 +1,14 @@
 from .base import Adapter, AdapterBlocked, AdapterError
+from .fallback import BlockedFallbackAdapter
+from .openclaw_browser import OpenClawBrowserAdapter, OpenClawBrowserClient
 from .shopify import ShopifyAdapter
 
-__all__ = ["Adapter", "AdapterBlocked", "AdapterError", "ShopifyAdapter"]
+__all__ = [
+    "Adapter",
+    "AdapterBlocked",
+    "AdapterError",
+    "BlockedFallbackAdapter",
+    "OpenClawBrowserAdapter",
+    "OpenClawBrowserClient",
+    "ShopifyAdapter",
+]
