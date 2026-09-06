@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -122,9 +123,23 @@ class OpenClawBrowserClient:
             raise AdapterError("OpenClaw browser command reported failure")
         return payload
 
+    def _close_owned_tab(self, label: str) -> None:
+        last_error: AdapterError | None = None
+        for delay in (0.0, 0.25, 0.75):
+            if delay:
+                time.sleep(delay)
+            try:
+                self._run("close", label)
+                return
+            except AdapterError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+
     def discover(self, store: str, label: str) -> dict[str, Any]:
-        self._run("open", store, "--label", label)
+        completed = False
         try:
+            self._run("open", store, "--label", label)
             raw = self._run(
                 "evaluate",
                 "--target-id",
@@ -137,14 +152,14 @@ class OpenClawBrowserClient:
             payload = _find_payload(raw)
             if payload is None:
                 raise AdapterError("OpenClaw browser returned no discovery payload")
-        except Exception:
+            completed = True
+            return payload
+        finally:
             try:
-                self._run("close", label)
+                self._close_owned_tab(label)
             except AdapterError:
-                pass
-            raise
-        self._run("close", label)
-        return payload
+                if completed:
+                    raise
 
 
 class OpenClawBrowserAdapter:

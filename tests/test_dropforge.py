@@ -155,13 +155,27 @@ class BrowserAdapterTests(unittest.TestCase):
             OpenClawBrowserAdapter(Client()).discover(target())
 
     def test_cli_failure_does_not_expose_command_output(self):
+        calls = []
+        close_attempts = 0
+
         def runner(args, _timeout):
+            nonlocal close_attempts
+            calls.append(args)
+            if "close" in args:
+                close_attempts += 1
+                if close_attempts == 1:
+                    return CompletedProcess(args, 1, stdout="{}", stderr="busy")
+                return CompletedProcess(args, 0, stdout="{}", stderr="")
             return CompletedProcess(args, 1, stdout='{"token":"private"}', stderr="private")
 
         client = OpenClawBrowserClient(runner=runner)
         with self.assertRaisesRegex(AdapterError, "exit 1") as caught:
             client.discover("https://shop.example.com", "owned-tab")
         self.assertNotIn("private", str(caught.exception))
+        self.assertIn("open", calls[0])
+        self.assertIn("close", calls[1])
+        self.assertIn("close", calls[2])
+        self.assertEqual(calls[2][-1], "owned-tab")
 
     def test_fallback_runs_only_for_blocked_primary(self):
         fallback = FakeAdapter([PRODUCT])
