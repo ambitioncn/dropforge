@@ -48,6 +48,18 @@ class StateStore:
                 payload TEXT NOT NULL
             )"""
         )
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS purchase_claims (
+                target_id TEXT NOT NULL,
+                product_id TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                status TEXT NOT NULL,
+                phase TEXT,
+                payload TEXT NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(target_id, product_id)
+            )"""
+        )
         self.connection.commit()
         self.lock = threading.Lock()
 
@@ -142,6 +154,61 @@ class StateStore:
             }
             result.append(item)
         return result
+
+    def reserve_purchase(self, target_id: str, product_id: str, candidate_key: str) -> bool:
+        payload = json.dumps({"target_id": target_id, "product_id": product_id}, sort_keys=True)
+        with self.lock, self.connection:
+            cursor = self.connection.execute(
+                """INSERT OR IGNORE INTO purchase_claims(
+                       target_id, product_id, candidate_key, status, phase, payload, updated_at
+                   ) VALUES (?, ?, ?, 'reserved', NULL, ?, ?)""",
+                (target_id, product_id, candidate_key, payload, time.time()),
+            )
+            return cursor.rowcount == 1
+
+    def purchase_claim(self, target_id: str, product_id: str) -> dict | None:
+        with self.lock:
+            row = self.connection.execute(
+                """SELECT candidate_key, status, phase, payload, updated_at
+                   FROM purchase_claims WHERE target_id = ? AND product_id = ?""",
+                (target_id, product_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "candidate_key": row[0],
+            "status": row[1],
+            "phase": row[2],
+            "payload": json.loads(row[3]),
+            "updated_at": row[4],
+        }
+
+    def update_purchase_claim(
+        self,
+        target_id: str,
+        product_id: str,
+        *,
+        status: str,
+        phase: str | None,
+        payload: dict,
+    ) -> bool:
+        encoded = json.dumps(payload, sort_keys=True)
+        with self.lock, self.connection:
+            previous = self.connection.execute(
+                """SELECT status, phase, payload FROM purchase_claims
+                   WHERE target_id = ? AND product_id = ?""",
+                (target_id, product_id),
+            ).fetchone()
+            if previous is None:
+                raise KeyError((target_id, product_id))
+            changed = previous != (status, phase, encoded)
+            self.connection.execute(
+                """UPDATE purchase_claims
+                   SET status = ?, phase = ?, payload = ?, updated_at = ?
+                   WHERE target_id = ? AND product_id = ?""",
+                (status, phase, encoded, time.time(), target_id, product_id),
+            )
+            return changed
 
     def close(self) -> None:
         self.connection.close()

@@ -27,6 +27,9 @@ mode never performs cart or checkout actions.
   ledger, expiring one-use authorization, and unknown-result reconciliation.
 - **Human verification:** CAPTCHA, login and 3DS pause the executor and preserve
   the same named OpenClaw browser tab for takeover.
+- **Standing purchase policies:** an optional operator-local policy can bridge
+  a monitored target to a guarded external checkout runner with product-level
+  idempotency, exact sizes/quantity/currency, and an all-in total ceiling.
 - **Operations:** transition-only Feishu notifications, persistent task
   start/stop controls, and a dashboard that can bind only to loopback.
 
@@ -105,6 +108,42 @@ max_unit_price_cents = 15000
 
 Use `title_contains` only when a site's title is unstable. Poll intervals under
 five seconds are rejected to avoid abusive traffic.
+
+Use `title_any_contains` for an explicit OR-list such as several possible shoe
+model names. Numeric sizes are compared exactly: `9` never matches `9.5`.
+
+### Optional standing purchase policy
+
+Standing purchases are disabled unless a target has a complete
+`[drops.purchase]` block. Paths point to an operator-owned guarded runner and a
+mode-0600 local secret file; secret values never enter TOML, SQLite, argv, or
+notifications.
+
+```toml
+[service]
+openclaw_notify_channel = "feishu"
+openclaw_notify_target = "operator-reference"
+
+[drops.match]
+title_any_contains = ["jordan", "sneaker"]
+sizes = ["8", "8.5", "9", "9.5", "10", "10.5"]
+max_unit_price_cents = 30000
+
+[drops.purchase]
+sizes = ["9", "9.5", "10", "8.5", "8", "10.5"]
+quantity_per_product = 3
+max_all_in_per_unit_cents = 30000
+currency = "USD"
+runner_path = "/absolute/path/to/guarded-runner"
+secret_file = "/absolute/path/to/mode-0600-secret-file"
+```
+
+The first available size in policy order is used. DropForge requests the
+configured quantity in one exact cart and never splits orders to evade retailer
+limits. The final checkout total must be no more than
+`quantity_per_product * max_all_in_per_unit_cents`. One product ID receives one
+durable claim across variants and restarts. CAPTCHA/3DS pauses for human
+takeover; an unknown submit result is reconcile-only.
 
 For a store whose public JSON endpoints return 401, 403 or 429, select the
 explicit browser fallback and (optionally) a managed OpenClaw profile:

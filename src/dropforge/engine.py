@@ -19,12 +19,14 @@ class MonitorEngine:
         max_concurrency: int = 8,
         error_confirmations: int = 3,
         on_change: Callable[[Observation], None] | None = None,
+        on_observation: Callable[[Observation], None] | None = None,
     ):
         self.adapters = adapters
         self.state = state
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.error_confirmations = error_confirmations
         self.on_change = on_change
+        self.on_observation = on_observation
 
     async def check(self, target: DropTarget) -> Observation:
         async with self.semaphore:
@@ -58,6 +60,8 @@ class MonitorEngine:
                 error_confirmations=self.error_confirmations,
             ) and self.on_change:
                 await asyncio.to_thread(self.on_change, observation)
+            if self.on_observation:
+                await asyncio.to_thread(self.on_observation, observation)
             return observation
 
     async def once(self, targets: tuple[DropTarget, ...]) -> list[Observation]:

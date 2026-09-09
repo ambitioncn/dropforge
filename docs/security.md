@@ -8,6 +8,11 @@
   currency, unit-price, cart-total, and final-total policy.
 - Checkout submission needs a fresh, one-use authorization bound to the intent
   and verified total. The authorization is consumed before the click.
+- A standing policy is itself explicit authorization only within its configured
+  target, exact size set, quantity, currency, and all-in ceiling. Each discovered
+  product is converted to an exact immutable intent before checkout.
+- Product-level claims prevent a second variant or process restart from buying
+  the same product again. Store limits are never evaded by splitting orders.
 - Per-intent locking and a mode-0600 ledger prevent concurrent or duplicate
   submission. An unknown result can only be reconciled.
 - CAPTCHA, login, and 3DS are same-session human handoffs; DropForge neither

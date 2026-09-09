@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .models import DropTarget, MatchRule
+from .models import DropTarget, MatchRule, StandingPurchasePolicy
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,8 @@ class ServiceConfig:
     feishu_timeout_seconds: float = 10
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8765
+    openclaw_notify_channel: str | None = None
+    openclaw_notify_target: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,14 @@ def load_config(path: Path) -> Config:
         feishu_timeout_seconds=float(service_raw.get("feishu_timeout_seconds", 10)),
         dashboard_host=str(service_raw.get("dashboard_host", "127.0.0.1")),
         dashboard_port=int(service_raw.get("dashboard_port", 8765)),
+        openclaw_notify_channel=(
+            str(service_raw["openclaw_notify_channel"])
+            if service_raw.get("openclaw_notify_channel") else None
+        ),
+        openclaw_notify_target=(
+            str(service_raw["openclaw_notify_target"])
+            if service_raw.get("openclaw_notify_target") else None
+        ),
     )
     if service.max_concurrency < 1 or service.max_concurrency > 64:
         raise ValueError("max_concurrency must be between 1 and 64")
@@ -80,10 +90,21 @@ def load_config(path: Path) -> Config:
         raise ValueError("dashboard_host must be the loopback address 127.0.0.1 or ::1")
     if service.dashboard_port < 1 or service.dashboard_port > 65535:
         raise ValueError("dashboard_port must be between 1 and 65535")
+    if bool(service.openclaw_notify_channel) != bool(service.openclaw_notify_target):
+        raise ValueError("OpenClaw notification channel and target must be configured together")
+    if service.openclaw_notify_channel and not re.fullmatch(
+        r"[a-z][a-z0-9_-]{1,31}", service.openclaw_notify_channel
+    ):
+        raise ValueError("invalid OpenClaw notification channel")
+    if service.openclaw_notify_target and not re.fullmatch(
+        r"[A-Za-z0-9:_@.-]{2,160}", service.openclaw_notify_target
+    ):
+        raise ValueError("invalid OpenClaw notification target")
 
     targets: list[DropTarget] = []
     for item in raw.get("drops", []):
         match_raw = item.get("match", {})
+        purchase_raw = item.get("purchase")
         target = DropTarget(
             id=str(item.get("id", "")),
             adapter=str(item.get("adapter", "shopify")),
@@ -94,6 +115,7 @@ def load_config(path: Path) -> Config:
             match=MatchRule(
                 title=match_raw.get("title"),
                 title_contains=_tuple(match_raw.get("title_contains")),
+                title_any_contains=_tuple(match_raw.get("title_any_contains")),
                 all_products=bool(match_raw.get("all_products", False)),
                 sizes=_tuple(match_raw.get("sizes")),
                 max_unit_price_cents=(
@@ -101,6 +123,19 @@ def load_config(path: Path) -> Config:
                     if match_raw.get("max_unit_price_cents") is not None
                     else None
                 ),
+            ),
+            purchase=(
+                StandingPurchasePolicy(
+                    sizes=_tuple(purchase_raw.get("sizes")),
+                    quantity_per_product=int(purchase_raw.get("quantity_per_product", 1)),
+                    max_all_in_per_unit_cents=int(
+                        purchase_raw.get("max_all_in_per_unit_cents", 0)
+                    ),
+                    currency=str(purchase_raw.get("currency", "")).upper(),
+                    runner_path=str(purchase_raw.get("runner_path", "")),
+                    secret_file=str(purchase_raw.get("secret_file", "")),
+                )
+                if isinstance(purchase_raw, dict) else None
             ),
         )
         target.validate()

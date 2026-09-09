@@ -14,12 +14,13 @@ from .adapters import (
     ShopifyAdapter,
     SalesforceCommerceCloudCategoryAdapter,
 )
+from .autobuy import AutoPurchaseCoordinator
 from .config import Config, load_config
 from .controls import TargetController
 from .dashboard import DashboardServer
 from .engine import MonitorEngine
 from .models import Observation
-from .notifications import FeishuWebhookSink, NotificationError
+from .notifications import FeishuWebhookSink, NotificationError, OpenClawMessageSink
 from .sinks import json_stdout
 from .state import StateStore
 
@@ -81,12 +82,31 @@ def make_engine(config: Config, state: StateStore, *, emit_changes: bool) -> Mon
         "shopify_browser": BlockedFallbackAdapter(shopify, browser),
         "sfcc_category": sfcc,
     }
+    purchase_notifier = (
+        OpenClawMessageSink(
+            config.service.openclaw_notify_channel,
+            config.service.openclaw_notify_target,
+        )
+        if config.service.openclaw_notify_channel and config.service.openclaw_notify_target
+        else None
+    )
+    purchase_coordinator = (
+        AutoPurchaseCoordinator(
+            state,
+            config.drops,
+            config.service.state_path.parent / "purchase-intents",
+            notifier=purchase_notifier,
+        )
+        if any(target.purchase is not None for target in config.drops)
+        else None
+    )
     return MonitorEngine(
         adapters=adapters,
         state=state,
         max_concurrency=config.service.max_concurrency,
         error_confirmations=config.service.error_confirmations,
         on_change=change_sink(config) if emit_changes else None,
+        on_observation=purchase_coordinator if emit_changes else None,
     )
 
 

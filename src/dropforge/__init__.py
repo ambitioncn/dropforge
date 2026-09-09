@@ -12,12 +12,14 @@ from .checkout import (
     PurchaseIntent,
 )
 from .checkout_browser import OpenClawCheckoutDriver
+from .autobuy import AutoPurchaseCoordinator, DropbotCommandRunner, PurchaseRunResult
 from .controls import TargetController
-from .notifications import FeishuWebhookSink, NotificationError
-from .models import Candidate, DropTarget, MatchRule, Product, Variant
+from .notifications import FeishuWebhookSink, NotificationError, OpenClawMessageSink
+from .models import Candidate, DropTarget, MatchRule, Product, StandingPurchasePolicy, Variant
 
 __all__ = [
     "Candidate",
+    "AutoPurchaseCoordinator",
     "CartLine",
     "CartSnapshot",
     "CheckoutLedger",
@@ -25,15 +27,19 @@ __all__ = [
     "CheckoutPolicyError",
     "CheckoutSnapshot",
     "DropTarget",
+    "DropbotCommandRunner",
     "GuardedCheckoutExecutor",
     "MatchRule",
     "FeishuWebhookSink",
     "NotificationError",
     "OpenClawCheckoutDriver",
+    "OpenClawMessageSink",
     "Product",
     "PurchaseAuthorization",
     "PurchaseIntent",
+    "PurchaseRunResult",
+    "StandingPurchasePolicy",
     "TargetController",
     "Variant",
 ]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

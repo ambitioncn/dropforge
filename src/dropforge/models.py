@@ -25,6 +25,21 @@ class Variant:
         return normalize(" ".join((self.title, *self.options)))
 
 
+def variant_matches_size(variant: Variant, size: str) -> bool:
+    wanted = str(size).strip()
+    raw = " ".join((variant.title, *variant.options))
+    if re.fullmatch(r"\d+(?:\.\d+)?", wanted):
+        raw = re.sub(
+            r"(?<!\d)(\d+)\s*1/2(?!\d)",
+            lambda match: f"{match.group(1)}.5",
+            raw,
+        )
+        values = re.findall(r"(?<!\d)(\d+(?:\.\d+)?)(?!\d)", raw)
+        return any(float(value) == float(wanted) for value in values)
+    key = normalize(wanted)
+    return key == variant.searchable_text or key in variant.searchable_text.split()
+
+
 @dataclass(frozen=True)
 class Product:
     id: str
@@ -38,14 +53,15 @@ class Product:
 class MatchRule:
     title: str | None = None
     title_contains: tuple[str, ...] = ()
+    title_any_contains: tuple[str, ...] = ()
     all_products: bool = False
     sizes: tuple[str, ...] = ()
     max_unit_price_cents: int | None = None
 
     def validate(self) -> None:
-        if not self.title and not self.title_contains and not self.all_products:
+        if not self.title and not self.title_contains and not self.title_any_contains and not self.all_products:
             raise ValueError("match requires title or title_contains")
-        if self.all_products and (self.title or self.title_contains):
+        if self.all_products and (self.title or self.title_contains or self.title_any_contains):
             raise ValueError("all_products cannot be combined with title filters")
         if self.title and normalize(self.title) in {"any", "all", ""}:
             raise ValueError("exact title cannot be Any/All")
@@ -60,20 +76,20 @@ class MatchRule:
         title = normalize(product.title)
         if self.title and title != normalize(self.title):
             return False
-        return all(normalize(term) in title for term in self.title_contains)
+        if not all(normalize(term) in title for term in self.title_contains):
+            return False
+        return not self.title_any_contains or any(
+            normalize(term) in title for term in self.title_any_contains
+        )
 
     def matching_variants(self, product: Product) -> list[Variant]:
-        wanted = [normalize(size) for size in self.sizes]
         result: list[Variant] = []
         for variant in product.variants:
             if not variant.available:
                 continue
             if self.max_unit_price_cents is not None and variant.price_cents > self.max_unit_price_cents:
                 continue
-            if wanted and not any(
-                size == variant.searchable_text or size in variant.searchable_text.split()
-                for size in wanted
-            ):
+            if self.sizes and not any(variant_matches_size(variant, size) for size in self.sizes):
                 continue
             result.append(variant)
         return result
@@ -88,6 +104,7 @@ class DropTarget:
     interval_seconds: float
     match: MatchRule
     enabled: bool = True
+    purchase: "StandingPurchasePolicy | None" = None
 
     def validate(self) -> None:
         if not re.fullmatch(r"[a-z][a-z0-9_-]{1,63}", self.id):
@@ -98,6 +115,40 @@ class DropTarget:
         if self.interval_seconds < 5:
             raise ValueError(f"drop {self.id}: interval_seconds must be >= 5")
         self.match.validate()
+        if self.purchase is not None:
+            self.purchase.validate()
+            matched = {normalize(size) for size in self.match.sizes}
+            purchased = {normalize(size) for size in self.purchase.sizes}
+            if not matched or not purchased.issubset(matched):
+                raise ValueError("purchase sizes must be a subset of monitored sizes")
+            if (
+                self.match.max_unit_price_cents is None
+                or self.match.max_unit_price_cents > self.purchase.max_all_in_per_unit_cents
+            ):
+                raise ValueError("monitored unit-price ceiling must not exceed purchase ceiling")
+
+
+@dataclass(frozen=True)
+class StandingPurchasePolicy:
+    sizes: tuple[str, ...]
+    quantity_per_product: int
+    max_all_in_per_unit_cents: int
+    currency: str
+    runner_path: str
+    secret_file: str
+
+    def validate(self) -> None:
+        if not self.sizes or any(normalize(size) in {"", "any", "all"} for size in self.sizes):
+            raise ValueError("purchase sizes must be explicit")
+        if self.quantity_per_product < 1 or self.quantity_per_product > 10:
+            raise ValueError("quantity_per_product must be between 1 and 10")
+        if self.max_all_in_per_unit_cents <= 0:
+            raise ValueError("max_all_in_per_unit_cents must be positive")
+        if not re.fullmatch(r"[A-Z]{3}", self.currency):
+            raise ValueError("purchase currency must be an ISO 4217 code")
+        for value, label in ((self.runner_path, "runner_path"), (self.secret_file, "secret_file")):
+            if not value.startswith("/") or "\x00" in value:
+                raise ValueError(f"purchase {label} must be an absolute path")
 
 
 @dataclass(frozen=True)

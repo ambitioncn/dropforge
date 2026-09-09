@@ -16,7 +16,7 @@ from dropforge.adapters.shopify import ShopifyAdapter
 from dropforge.adapters.sfcc import SalesforceCommerceCloudCategoryAdapter, products_from_sfcc_category
 from dropforge.config import load_config
 from dropforge.engine import MonitorEngine
-from dropforge.models import DropTarget, MatchRule, Observation, Product, Variant
+from dropforge.models import DropTarget, MatchRule, Observation, Product, Variant, variant_matches_size
 from dropforge.state import StateStore
 
 
@@ -71,6 +71,15 @@ class ModelTests(unittest.TestCase):
         rule = MatchRule(title="Cactus Crewneck", sizes=("L",), max_unit_price_cents=10000)
         self.assertEqual(rule.matching_variants(PRODUCT), [])
 
+    def test_decimal_shoe_sizes_are_exact(self):
+        nine = Variant("v9", "US 9", True, 10000, ("9",))
+        nine_half = Variant("v95", "US 9.5", True, 10000, ("9.5",))
+        fraction = Variant("vf", "US 9 1/2", True, 10000)
+        self.assertTrue(variant_matches_size(nine, "9"))
+        self.assertFalse(variant_matches_size(nine_half, "9"))
+        self.assertTrue(variant_matches_size(nine_half, "9.5"))
+        self.assertTrue(variant_matches_size(fraction, "9.5"))
+
     def test_any_is_rejected(self):
         with self.assertRaises(ValueError):
             MatchRule(title="Any").validate()
@@ -81,6 +90,13 @@ class ModelTests(unittest.TestCase):
         self.assertTrue(rule.matches_product(PRODUCT))
         with self.assertRaises(ValueError):
             MatchRule(title="Cactus Crewneck", all_products=True).validate()
+
+    def test_any_title_terms_are_or_matched(self):
+        rule = MatchRule(title_any_contains=("jordan", "sneaker"))
+        rule.validate()
+        self.assertFalse(rule.matches_product(PRODUCT))
+        shoe = Product("shoe", "Cactus Jordan Low", "shoe", "https://example.test/shoe")
+        self.assertTrue(rule.matches_product(shoe))
 
     def test_observation_detail_does_not_change_state_digest(self):
         first = Observation("drop-one", "error", 1, detail="timeout")

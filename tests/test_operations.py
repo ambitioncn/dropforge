@@ -113,6 +113,7 @@ class OperationsConfigTests(unittest.TestCase):
         self.assertEqual(config.service.dashboard_port, 8765)
         self.assertIsNone(config.service.feishu_webhook_env)
         self.assertEqual(config.service.error_confirmations, 3)
+        self.assertIsNone(config.service.openclaw_notify_target)
 
     def test_error_confirmation_range_is_validated(self):
         for value in (0, 11):
@@ -126,6 +127,40 @@ class OperationsConfigTests(unittest.TestCase):
         ):
             with self.subTest(line=line), self.assertRaises(ValueError):
                 self.config(line)
+
+    def test_purchase_policy_requires_explicit_bounded_sizes_and_paths(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        path = Path(temp.name) / "drops.toml"
+        path.write_text(dedent(f"""
+            [service]
+            state_path = "{Path(temp.name) / 'state.db'}"
+            openclaw_notify_channel = "feishu"
+            openclaw_notify_target = "operator-id"
+
+            [[drops]]
+            id = "travis-shoes"
+            adapter = "shopify_browser"
+            store = "https://shop.example.test"
+            query = "shoe"
+            interval_seconds = 15
+
+            [drops.match]
+            title_any_contains = ["jordan", "shoe"]
+            sizes = ["8", "8.5", "9", "9.5", "10", "10.5"]
+            max_unit_price_cents = 30000
+
+            [drops.purchase]
+            sizes = ["9", "9.5", "10", "8.5", "8", "10.5"]
+            quantity_per_product = 3
+            max_all_in_per_unit_cents = 30000
+            currency = "USD"
+            runner_path = "/opt/dropbot"
+            secret_file = "/run/secrets/checkout"
+        """))
+        loaded = load_config(path)
+        self.assertEqual(loaded.drops[0].purchase.quantity_per_product, 3)
+        self.assertEqual(loaded.service.openclaw_notify_channel, "feishu")
 
 
 class OperationsCliTests(unittest.TestCase):

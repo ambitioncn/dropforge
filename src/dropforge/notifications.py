@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -89,3 +91,53 @@ class FanoutSink:
                 failures.append(str(exc))
         if failures:
             raise NotificationError("; ".join(failures))
+
+
+class OpenClawMessageSink:
+    """Send sanitized operator events through a locally authenticated OpenClaw channel."""
+
+    def __init__(self, channel: str, target: str, *, runner=subprocess.run):
+        self.channel = channel
+        self.target = target
+        self.runner = runner
+
+    def __call__(self, event: dict) -> None:
+        status = str(event.get("status", "unknown"))
+        product = re.sub(r"[^A-Za-z0-9 ._+'/-]", "", str(event.get("product", "")))[:160]
+        size = re.sub(r"[^A-Za-z0-9 ._+/-]", "", str(event.get("size", "")))[:40]
+        quantity = int(event.get("quantity", 0))
+        reference = re.sub(
+            r"[^A-Za-z0-9._#-]", "", str(event.get("order_reference", ""))
+        )[:128]
+        if status == "policy_armed":
+            text = "DropForge 通知测试通过：Travis Scott 未来鞋款自动购买策略已启用。"
+        elif status == "order_confirmed":
+            text = f"DropForge 下单成功：{product}，尺码 {size}，数量 {quantity}"
+            if reference:
+                text += f"，订单 {reference}"
+        elif status == "manual_auth_required":
+            text = f"DropForge 需要人工验证：{product}，尺码 {size}，数量 {quantity}。请接管同一浏览器完成 CAPTCHA/3DS。"
+        elif status == "result_unknown":
+            text = f"DropForge 下单结果未知：{product}，尺码 {size}，数量 {quantity}。系统不会重复提交，需人工对账。"
+        else:
+            text = f"DropForge 下单失败：{product}，尺码 {size}，数量 {quantity}（{status}）"
+        try:
+            completed = self.runner(
+                [
+                    "openclaw", "message", "send", "--json",
+                    "--channel", self.channel, "--target", self.target,
+                    "--message", text,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise NotificationError(
+                f"OpenClaw notification unavailable: {type(exc).__name__}"
+            ) from None
+        if completed.returncode != 0:
+            raise NotificationError(
+                f"OpenClaw notification failed with exit {completed.returncode}"
+            )

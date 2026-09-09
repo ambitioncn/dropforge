@@ -18,6 +18,8 @@ browser.
 | `feishu_timeout_seconds` | `10` | Positive seconds. |
 | `dashboard_host` | `127.0.0.1` | Exactly `127.0.0.1` or `::1`. |
 | `dashboard_port` | `8765` | Integer from 1 through 65535. |
+| `openclaw_notify_channel` | unset | Local OpenClaw channel name; requires target. |
+| `openclaw_notify_target` | unset | Opaque operator reference; requires channel. |
 
 Relative state paths are resolved from the configuration file directory. For a
 container, use `/data/state.db`; for the systemd unit, use the absolute path
@@ -41,6 +43,23 @@ For catalog-change monitoring only, `match.all_products = true` explicitly
 matches every available product in the category. It cannot be combined with
 title filters and does not weaken the guarded checkout executor's exact intent
 requirements.
+
+`match.title_any_contains` is an explicit OR-list and cannot be combined with
+`all_products`. Numeric sizes are matched as numeric tokens, so size `9` does
+not match `9.5`.
+
+## Standing purchase policy
+
+`[drops.purchase]` is optional and absent by default. When present, it requires
+explicit `sizes`, `quantity_per_product`, `max_all_in_per_unit_cents`,
+three-letter `currency`, an absolute `runner_path`, and an absolute
+`secret_file`. Purchase sizes must be a subset of monitored sizes, and the
+monitor price ceiling cannot exceed the purchase ceiling.
+
+The secret file itself must be mode 0600. DropForge passes only its path to the
+guarded runner and never reads or logs its contents. The runner must independently
+verify the exact product, variant, quantity, cart currency, and final all-in
+total before submission.
 
 Runtime `start` and `stop` overrides are stored in SQLite and take precedence
 over the configured `enabled` default until changed again.
