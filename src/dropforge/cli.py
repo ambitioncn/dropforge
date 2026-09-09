@@ -85,6 +85,7 @@ def make_engine(config: Config, state: StateStore, *, emit_changes: bool) -> Mon
         adapters=adapters,
         state=state,
         max_concurrency=config.service.max_concurrency,
+        error_confirmations=config.service.error_confirmations,
         on_change=change_sink(config) if emit_changes else None,
     )
 

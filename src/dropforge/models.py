@@ -148,6 +148,5 @@ class Observation:
         payload = {
             "status": self.status,
             "candidates": [item.public_dict() for item in self.candidates],
-            "detail": self.detail,
         }
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()

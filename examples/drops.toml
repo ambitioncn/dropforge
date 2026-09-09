@@ -5,6 +5,7 @@ request_timeout_seconds = 12
 user_agent = "DropForge/0.1 (operator@example.com)"
 browser_profile = "openclaw"
 browser_timeout_seconds = 30
+error_confirmations = 3
 # Optional protected-secret reference; the webhook URL itself does not belong in TOML.
 # feishu_webhook_env = "DROP_FORGE_FEISHU_WEBHOOK"
 # feishu_timeout_seconds = 10

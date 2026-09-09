@@ -13,6 +13,7 @@ browser.
 | `request_timeout_seconds` | `12` | Positive seconds. |
 | `browser_profile` | unset | Name only; never a profile path or exported profile. |
 | `browser_timeout_seconds` | `30` | Positive seconds. |
+| `error_confirmations` | `3` | Consecutive transient errors required before changing stable state; 1 through 10. |
 | `feishu_webhook_env` | unset | Uppercase environment-variable name, never a URL. |
 | `feishu_timeout_seconds` | `10` | Positive seconds. |
 | `dashboard_host` | `127.0.0.1` | Exactly `127.0.0.1` or `::1`. |
@@ -43,6 +44,11 @@ requirements.
 
 Runtime `start` and `stop` overrides are stored in SQLite and take precedence
 over the configured `enabled` default until changed again.
+
+Transient adapter failures use `error_confirmations` to avoid one-sample event
+flapping. Successful, unavailable, blocked, and candidate-set changes remain
+immediate. A target with no previous baseline records its first error so a new
+misconfiguration is still visible.
 
 ## Secret references
 

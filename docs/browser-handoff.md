@@ -7,6 +7,11 @@ known to return 401, 403, or 429. DropForge opens an owned OpenClaw tab, perform
 a same-origin read-only `/products.json` request, and closes only that discovery
 tab. Ordinary transport failures do not trigger browser fallback.
 
+Discovery uses the stable target handle returned by OpenClaw's `open` response;
+it does not assume that a requested label was registered. A safe evaluate may
+be retried once on a transient CLI failure, and cleanup always targets that
+returned handle.
+
 OpenClaw must already be installed and authenticated by the operator, and
 `browser.evaluateEnabled` must be enabled. DropForge accepts a profile name,
 not credentials or a profile export.

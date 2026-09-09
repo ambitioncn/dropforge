@@ -16,7 +16,7 @@ from dropforge.adapters.shopify import ShopifyAdapter
 from dropforge.adapters.sfcc import SalesforceCommerceCloudCategoryAdapter, products_from_sfcc_category
 from dropforge.config import load_config
 from dropforge.engine import MonitorEngine
-from dropforge.models import DropTarget, MatchRule, Product, Variant
+from dropforge.models import DropTarget, MatchRule, Observation, Product, Variant
 from dropforge.state import StateStore
 
 
@@ -81,6 +81,11 @@ class ModelTests(unittest.TestCase):
         self.assertTrue(rule.matches_product(PRODUCT))
         with self.assertRaises(ValueError):
             MatchRule(title="Cactus Crewneck", all_products=True).validate()
+
+    def test_observation_detail_does_not_change_state_digest(self):
+        first = Observation("drop-one", "error", 1, detail="timeout")
+        second = Observation("drop-one", "error", 2, detail="connection reset")
+        self.assertEqual(first.digest, second.digest)
 
 
 class ConfigTests(unittest.TestCase):
@@ -172,6 +177,10 @@ class BrowserAdapterTests(unittest.TestCase):
 
         def runner(args, _timeout):
             calls.append(args)
+            if "open" in args:
+                return CompletedProcess(
+                    args, 0, stdout=json.dumps({"targetId": "raw-target-id"}), stderr=""
+                )
             if "evaluate" in args:
                 payload = {"result": {"value": {
                     "dropforgeVersion": 1,
@@ -198,7 +207,8 @@ class BrowserAdapterTests(unittest.TestCase):
         self.assertIn("evaluate", calls[1])
         self.assertIn("close", calls[2])
         self.assertIn("--browser-profile", calls[0])
-        self.assertEqual(calls[1][calls[1].index("--target-id") + 1], calls[2][-1])
+        self.assertEqual(calls[1][calls[1].index("--target-id") + 1], "raw-target-id")
+        self.assertEqual(calls[2][-1], "raw-target-id")
 
     def test_browser_challenge_is_reported_as_blocked(self):
         class Client:
@@ -215,6 +225,10 @@ class BrowserAdapterTests(unittest.TestCase):
         def runner(args, _timeout):
             nonlocal close_attempts
             calls.append(args)
+            if "open" in args:
+                return CompletedProcess(
+                    args, 0, stdout=json.dumps({"targetId": "raw-target-id"}), stderr=""
+                )
             if "close" in args:
                 close_attempts += 1
                 if close_attempts == 1:
@@ -227,9 +241,61 @@ class BrowserAdapterTests(unittest.TestCase):
             client.discover("https://shop.example.com", "owned-tab")
         self.assertNotIn("private", str(caught.exception))
         self.assertIn("open", calls[0])
-        self.assertIn("close", calls[1])
-        self.assertIn("close", calls[2])
-        self.assertEqual(calls[2][-1], "owned-tab")
+        self.assertIn("evaluate", calls[1])
+        self.assertIn("evaluate", calls[2])
+        self.assertIn("close", calls[3])
+        self.assertIn("close", calls[4])
+        self.assertEqual(calls[4][-1], "raw-target-id")
+
+    def test_transient_evaluate_failure_is_retried_on_same_tab(self):
+        calls = []
+        evaluates = 0
+
+        def runner(args, _timeout):
+            nonlocal evaluates
+            calls.append(args)
+            if "open" in args:
+                return CompletedProcess(args, 0, stdout='{"targetId":"t-safe"}', stderr="")
+            if "evaluate" in args:
+                evaluates += 1
+                if evaluates == 1:
+                    return CompletedProcess(args, 1, stdout="{}", stderr="busy")
+                return CompletedProcess(args, 0, stdout=json.dumps({"result": {"value": {
+                    "dropforgeVersion": 1, "status": "ok", "products": []
+                }}}), stderr="")
+            return CompletedProcess(args, 0, stdout="{}", stderr="")
+
+        payload = OpenClawBrowserClient(runner=runner).discover(
+            "https://shop.example.com", "ignored-label"
+        )
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(evaluates, 2)
+        self.assertEqual(calls[-1][-1], "t-safe")
+
+    def test_failed_open_recovers_a_created_labeled_tab(self):
+        calls = []
+
+        def runner(args, _timeout):
+            calls.append(args)
+            if "open" in args:
+                return CompletedProcess(args, 1, stdout="{}", stderr="timed out")
+            if "tabs" in args:
+                return CompletedProcess(args, 0, stdout=json.dumps({"tabs": [{
+                    "label": "owned-label", "tabId": "t-recovered"
+                }]}), stderr="")
+            if "evaluate" in args:
+                return CompletedProcess(args, 0, stdout=json.dumps({"result": {"value": {
+                    "dropforgeVersion": 1, "status": "blocked", "reason": "password"
+                }}}), stderr="")
+            return CompletedProcess(args, 0, stdout="{}", stderr="")
+
+        payload = OpenClawBrowserClient(runner=runner).discover(
+            "https://shop.example.com", "owned-label"
+        )
+        self.assertEqual(payload["status"], "blocked")
+        self.assertIn("tabs", calls[1])
+        self.assertEqual(calls[2][calls[2].index("--target-id") + 1], "t-recovered")
+        self.assertEqual(calls[-1][-1], "t-recovered")
 
     def test_fallback_runs_only_for_blocked_primary(self):
         fallback = FakeAdapter([PRODUCT])
@@ -259,6 +325,31 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.status, "available")
         self.assertEqual(len(changes), 1)
         self.assertEqual(len(self.state.events()), 1)
+
+    async def test_transient_errors_require_consecutive_confirmation(self):
+        changes = []
+        available = MonitorEngine(
+            adapters={"fake": FakeAdapter([PRODUCT])},
+            state=self.state,
+            error_confirmations=3,
+            on_change=changes.append,
+        )
+        failing = MonitorEngine(
+            adapters={"fake": RaisingAdapter(AdapterError("timeout"))},
+            state=self.state,
+            error_confirmations=3,
+            on_change=changes.append,
+        )
+        await available.check(target())
+        await failing.check(target())
+        await available.check(target())
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(self.state.target_statuses({"drop-one": True})[0]["observation"]["status"], "available")
+
+        await failing.check(target())
+        await failing.check(target())
+        await failing.check(target())
+        self.assertEqual([item.status for item in changes], ["available", "error"])
 
     async def test_targets_are_checked_concurrently(self):
         engine = MonitorEngine(adapters={"fake": FakeAdapter([], delay=0.15)}, state=self.state)

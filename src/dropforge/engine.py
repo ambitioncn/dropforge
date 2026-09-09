@@ -17,11 +17,13 @@ class MonitorEngine:
         adapters: dict[str, Adapter],
         state: StateStore,
         max_concurrency: int = 8,
+        error_confirmations: int = 3,
         on_change: Callable[[Observation], None] | None = None,
     ):
         self.adapters = adapters
         self.state = state
         self.semaphore = asyncio.Semaphore(max_concurrency)
+        self.error_confirmations = error_confirmations
         self.on_change = on_change
 
     async def check(self, target: DropTarget) -> Observation:
@@ -51,7 +53,10 @@ class MonitorEngine:
                     observation = Observation(target.id, "error", checked_at, detail=str(exc))
                 except Exception as exc:
                     observation = Observation(target.id, "error", checked_at, detail=type(exc).__name__)
-            if self.state.record(observation) and self.on_change:
+            if self.state.record(
+                observation,
+                error_confirmations=self.error_confirmations,
+            ) and self.on_change:
                 await asyncio.to_thread(self.on_change, observation)
             return observation
 

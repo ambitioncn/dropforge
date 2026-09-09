@@ -17,6 +17,7 @@ class ServiceConfig:
     user_agent: str = "DropForge/0.1"
     browser_profile: str | None = None
     browser_timeout_seconds: float = 30
+    error_confirmations: int = 3
     feishu_webhook_env: str | None = None
     feishu_timeout_seconds: float = 10
     dashboard_host: str = "127.0.0.1"
@@ -52,6 +53,7 @@ def load_config(path: Path) -> Config:
             str(service_raw["browser_profile"]) if service_raw.get("browser_profile") else None
         ),
         browser_timeout_seconds=float(service_raw.get("browser_timeout_seconds", 30)),
+        error_confirmations=int(service_raw.get("error_confirmations", 3)),
         feishu_webhook_env=(
             str(service_raw["feishu_webhook_env"])
             if service_raw.get("feishu_webhook_env") else None
@@ -66,6 +68,8 @@ def load_config(path: Path) -> Config:
         raise ValueError("request_timeout_seconds must be positive")
     if service.browser_timeout_seconds <= 0:
         raise ValueError("browser_timeout_seconds must be positive")
+    if service.error_confirmations < 1 or service.error_confirmations > 10:
+        raise ValueError("error_confirmations must be between 1 and 10")
     if service.feishu_timeout_seconds <= 0:
         raise ValueError("feishu_timeout_seconds must be positive")
     if service.feishu_webhook_env and not re.fullmatch(

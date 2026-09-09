@@ -112,6 +112,12 @@ class OperationsConfigTests(unittest.TestCase):
         self.assertEqual(config.service.dashboard_host, "127.0.0.1")
         self.assertEqual(config.service.dashboard_port, 8765)
         self.assertIsNone(config.service.feishu_webhook_env)
+        self.assertEqual(config.service.error_confirmations, 3)
+
+    def test_error_confirmation_range_is_validated(self):
+        for value in (0, 11):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.config(f"error_confirmations = {value}")
 
     def test_plaintext_webhook_and_non_loopback_config_are_rejected(self):
         for line in (

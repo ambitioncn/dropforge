@@ -39,16 +39,51 @@ class StateStore:
                 payload TEXT NOT NULL
             )"""
         )
+        self.connection.execute(
+            """CREATE TABLE IF NOT EXISTS pending_observation (
+                target_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                count INTEGER NOT NULL CHECK(count >= 1),
+                checked_at REAL NOT NULL,
+                payload TEXT NOT NULL
+            )"""
+        )
         self.connection.commit()
         self.lock = threading.Lock()
 
-    def record(self, observation: Observation) -> bool:
+    def record(self, observation: Observation, *, error_confirmations: int = 1) -> bool:
+        if error_confirmations < 1:
+            raise ValueError("error_confirmations must be positive")
         payload = json.dumps(observation.public_dict(), sort_keys=True)
         with self.lock, self.connection:
             row = self.connection.execute(
-                "SELECT digest FROM target_state WHERE target_id = ?", (observation.target_id,)
+                "SELECT status, digest FROM target_state WHERE target_id = ?", (observation.target_id,)
             ).fetchone()
-            changed = row is None or row[0] != observation.digest
+            if (
+                observation.status == "error"
+                and error_confirmations > 1
+                and row is not None
+                and row[0] != "error"
+            ):
+                pending = self.connection.execute(
+                    "SELECT status, count FROM pending_observation WHERE target_id = ?",
+                    (observation.target_id,),
+                ).fetchone()
+                count = pending[1] + 1 if pending and pending[0] == "error" else 1
+                self.connection.execute(
+                    """INSERT INTO pending_observation(target_id, status, count, checked_at, payload)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(target_id) DO UPDATE SET
+                         status=excluded.status, count=excluded.count,
+                         checked_at=excluded.checked_at, payload=excluded.payload""",
+                    (observation.target_id, observation.status, count, observation.checked_at, payload),
+                )
+                if count < error_confirmations:
+                    return False
+            self.connection.execute(
+                "DELETE FROM pending_observation WHERE target_id = ?", (observation.target_id,)
+            )
+            changed = row is None or row[1] != observation.digest
             self.connection.execute(
                 """INSERT INTO target_state(target_id, status, digest, checked_at, payload)
                    VALUES (?, ?, ?, ?, ?)

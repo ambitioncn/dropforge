@@ -87,6 +87,45 @@ def _find_payload(value: Any) -> dict[str, Any] | None:
     return None
 
 
+def _find_target_handle(value: Any) -> str | None:
+    if isinstance(value, str):
+        try:
+            return _find_target_handle(json.loads(value))
+        except json.JSONDecodeError:
+            return None
+    if isinstance(value, dict):
+        for key in ("suggestedTargetId", "tabId", "targetId"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        for key in ("result", "value", "data"):
+            if key in value:
+                found = _find_target_handle(value[key])
+                if found is not None:
+                    return found
+    return None
+
+
+def _find_labeled_target_handle(value: Any, label: str) -> str | None:
+    if isinstance(value, str):
+        try:
+            return _find_labeled_target_handle(json.loads(value), label)
+        except json.JSONDecodeError:
+            return None
+    if isinstance(value, dict):
+        tabs = value.get("tabs")
+        if isinstance(tabs, list):
+            for tab in tabs:
+                if isinstance(tab, dict) and tab.get("label") == label:
+                    return _find_target_handle(tab)
+        for key in ("result", "value", "data"):
+            if key in value:
+                found = _find_labeled_target_handle(value[key], label)
+                if found is not None:
+                    return found
+    return None
+
+
 class OpenClawBrowserClient:
     """Small, non-shelling wrapper around the local OpenClaw browser CLI."""
 
@@ -109,12 +148,17 @@ class OpenClawBrowserClient:
         return args
 
     def _run(self, *command: str) -> Any:
+        operation = command[0] if command and command[0].isalpha() else "command"
         try:
             completed = self.runner(self._args(*command), self.timeout + 5)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise AdapterError(f"OpenClaw browser command unavailable: {type(exc).__name__}") from exc
+            raise AdapterError(
+                f"OpenClaw browser {operation} unavailable: {type(exc).__name__}"
+            ) from exc
         if completed.returncode != 0:
-            raise AdapterError(f"OpenClaw browser command failed with exit {completed.returncode}")
+            raise AdapterError(
+                f"OpenClaw browser {operation} failed with exit {completed.returncode}"
+            )
         try:
             payload = json.loads(completed.stdout or "{}")
         except json.JSONDecodeError as exc:
@@ -123,13 +167,13 @@ class OpenClawBrowserClient:
             raise AdapterError("OpenClaw browser command reported failure")
         return payload
 
-    def _close_owned_tab(self, label: str) -> None:
+    def _close_owned_tab(self, target_handle: str) -> None:
         last_error: AdapterError | None = None
         for delay in (0.0, 0.25, 0.75):
             if delay:
                 time.sleep(delay)
             try:
-                self._run("close", label)
+                self._run("close", target_handle)
                 return
             except AdapterError as exc:
                 last_error = exc
@@ -138,17 +182,41 @@ class OpenClawBrowserClient:
 
     def discover(self, store: str, label: str) -> dict[str, Any]:
         completed = False
+        target_handle: str | None = None
         try:
-            self._run("open", store, "--label", label)
-            raw = self._run(
-                "evaluate",
-                "--target-id",
-                label,
-                "--timeout-ms",
-                str(round(self.timeout * 1000)),
-                "--fn",
-                DISCOVERY_SCRIPT,
-            )
+            try:
+                opened = self._run("open", store, "--label", label)
+                target_handle = _find_target_handle(opened)
+            except AdapterError as open_error:
+                try:
+                    target_handle = _find_labeled_target_handle(self._run("tabs"), label)
+                except AdapterError:
+                    raise open_error
+                if target_handle is None:
+                    raise open_error
+            if target_handle is None:
+                raise AdapterError("OpenClaw browser open returned no target handle")
+            raw = None
+            last_error: AdapterError | None = None
+            for delay in (0.0, 0.5):
+                if delay:
+                    time.sleep(delay)
+                try:
+                    raw = self._run(
+                        "evaluate",
+                        "--target-id",
+                        target_handle,
+                        "--timeout-ms",
+                        str(round(self.timeout * 1000)),
+                        "--fn",
+                        DISCOVERY_SCRIPT,
+                    )
+                    break
+                except AdapterError as exc:
+                    last_error = exc
+            if raw is None:
+                assert last_error is not None
+                raise last_error
             payload = _find_payload(raw)
             if payload is None:
                 raise AdapterError("OpenClaw browser returned no discovery payload")
@@ -156,7 +224,8 @@ class OpenClawBrowserClient:
             return payload
         finally:
             try:
-                self._close_owned_tab(label)
+                if target_handle is not None:
+                    self._close_owned_tab(target_handle)
             except AdapterError:
                 if completed:
                     raise

@@ -10,8 +10,10 @@
    blocked, using a temporary OpenClaw browser tab and same-origin read-only
    request. Challenge/password pages remain blocked.
 4. Match rules select explicit titles, variants, and price ceilings.
-5. `StateStore` records the latest observation and appends an event only when
-   the observation digest changes.
+5. `StateStore` records stable observations and appends an event only when the
+   status or candidate set changes. Diagnostic-detail changes alone do not
+   create events. Transient errors require the configured number of consecutive
+   observations before replacing a known stable state.
 6. Event sinks print public JSON and optionally notify a Feishu custom bot using
    a protected environment reference. Delivery is bounded and failures are
    sanitized without stopping monitoring.
