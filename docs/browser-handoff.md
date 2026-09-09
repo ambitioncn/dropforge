@@ -9,8 +9,8 @@ tab. Ordinary transport failures do not trigger browser fallback.
 
 Discovery uses the stable target handle returned by OpenClaw's `open` response;
 it does not assume that a requested label was registered. A safe evaluate may
-be retried once on a transient CLI failure, and cleanup always targets that
-returned handle.
+be retried once on a transient CLI failure after a bounded DOM-ready wait, and
+cleanup always targets that returned handle.
 
 OpenClaw must already be installed and authenticated by the operator, and
 `browser.evaluateEnabled` must be enabled. DropForge accepts a profile name,

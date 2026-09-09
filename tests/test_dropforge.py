@@ -204,11 +204,14 @@ class BrowserAdapterTests(unittest.TestCase):
         products = OpenClawBrowserAdapter(client).discover(target())
         self.assertEqual(products[0].variants[0].price_cents, 13500)
         self.assertIn("open", calls[0])
-        self.assertIn("evaluate", calls[1])
-        self.assertIn("close", calls[2])
+        self.assertTrue(any("wait" in call for call in calls))
+        evaluate_call = next(call for call in calls if "evaluate" in call)
+        close_call = next(call for call in calls if "close" in call)
         self.assertIn("--browser-profile", calls[0])
-        self.assertEqual(calls[1][calls[1].index("--target-id") + 1], "raw-target-id")
-        self.assertEqual(calls[2][-1], "raw-target-id")
+        self.assertEqual(
+            evaluate_call[evaluate_call.index("--target-id") + 1], "raw-target-id"
+        )
+        self.assertEqual(close_call[-1], "raw-target-id")
 
     def test_browser_challenge_is_reported_as_blocked(self):
         class Client:
@@ -241,11 +244,10 @@ class BrowserAdapterTests(unittest.TestCase):
             client.discover("https://shop.example.com", "owned-tab")
         self.assertNotIn("private", str(caught.exception))
         self.assertIn("open", calls[0])
-        self.assertIn("evaluate", calls[1])
-        self.assertIn("evaluate", calls[2])
-        self.assertIn("close", calls[3])
-        self.assertIn("close", calls[4])
-        self.assertEqual(calls[4][-1], "raw-target-id")
+        self.assertEqual(sum("evaluate" in call for call in calls), 2)
+        close_calls = [call for call in calls if "close" in call]
+        self.assertEqual(len(close_calls), 2)
+        self.assertEqual(close_calls[-1][-1], "raw-target-id")
 
     def test_transient_evaluate_failure_is_retried_on_same_tab(self):
         calls = []
@@ -294,7 +296,10 @@ class BrowserAdapterTests(unittest.TestCase):
         )
         self.assertEqual(payload["status"], "blocked")
         self.assertIn("tabs", calls[1])
-        self.assertEqual(calls[2][calls[2].index("--target-id") + 1], "t-recovered")
+        evaluate_call = next(call for call in calls if "evaluate" in call)
+        self.assertEqual(
+            evaluate_call[evaluate_call.index("--target-id") + 1], "t-recovered"
+        )
         self.assertEqual(calls[-1][-1], "t-recovered")
 
     def test_fallback_runs_only_for_blocked_primary(self):

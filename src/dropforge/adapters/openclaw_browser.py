@@ -196,6 +196,20 @@ class OpenClawBrowserClient:
                     raise open_error
             if target_handle is None:
                 raise AdapterError("OpenClaw browser open returned no target handle")
+            try:
+                self._run(
+                    "wait",
+                    "--target-id",
+                    target_handle,
+                    "--load",
+                    "domcontentloaded",
+                    "--timeout-ms",
+                    "10000",
+                )
+            except AdapterError:
+                # The following evaluate remains bounded and may still succeed
+                # when the load-state notification was missed during navigation.
+                time.sleep(0.5)
             raw = None
             last_error: AdapterError | None = None
             for delay in (0.0, 0.5):
