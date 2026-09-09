@@ -62,7 +62,10 @@ class DropbotCommandRunner:
         if not secret.is_file() or secret.stat().st_mode & 0o077:
             raise RuntimeError("purchase secret file is missing or not mode 0600")
 
-    def intent_path(self, target: DropTarget, candidate: Candidate, size: str) -> Path:
+    def intent_path(
+        self, target: DropTarget, candidate: Candidate, size: str, quantity: int | None = None
+    ) -> Path:
+        quantity = self.policy.quantity_per_product if quantity is None else quantity
         key = hashlib.sha256(
             f"{target.id}\0{candidate.product.id}".encode()
         ).hexdigest()[:24]
@@ -71,10 +74,10 @@ class DropbotCommandRunner:
             "store": candidate.store,
             "title": candidate.product.title,
             "size": size,
-            "quantity": self.policy.quantity_per_product,
+            "quantity": quantity,
             "max_unit_price_cents": self.policy.max_all_in_per_unit_cents,
             "max_total_cents": (
-                self.policy.max_all_in_per_unit_cents * self.policy.quantity_per_product
+                self.policy.max_all_in_per_unit_cents * quantity
             ),
             "handle": candidate.product.handle,
         }
@@ -206,9 +209,10 @@ class AutoPurchaseCoordinator:
         )
         try:
             runner = self.runner_factory(policy)
-            intent_path = runner.intent_path(target, candidate, size)
             status = claim["status"]
             phase = claim.get("phase")
+            quantity = int(claim["payload"].get("quantity", policy.quantity_per_product))
+            intent_path = runner.intent_path(target, candidate, size, quantity)
             if status == "result_unknown" or phase in {"submit", "post_submit", "reconcile"}:
                 result = runner.reconcile(intent_path)
             else:
@@ -217,6 +221,10 @@ class AutoPurchaseCoordinator:
                     payload=claim["payload"],
                 )
                 result = runner.prepare(intent_path)
+                if result.status == "failed" and policy.fallback_quantity is not None:
+                    quantity = policy.fallback_quantity
+                    intent_path = runner.intent_path(target, candidate, size, quantity)
+                    result = runner.prepare(intent_path)
                 if result.status == "checkout_ready":
                     self.state.update_purchase_claim(
                         target.id, product_id, status="in_progress", phase="submit",
@@ -229,7 +237,7 @@ class AutoPurchaseCoordinator:
             "status": result.status,
             "product": candidate.product.title,
             "size": size,
-            "quantity": policy.quantity_per_product,
+            "quantity": quantity,
             "order_reference": result.order_reference,
         }
         self.state.update_purchase_claim(

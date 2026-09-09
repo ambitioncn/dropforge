@@ -128,6 +128,10 @@ def load_config(path: Path) -> Config:
                 StandingPurchasePolicy(
                     sizes=_tuple(purchase_raw.get("sizes")),
                     quantity_per_product=int(purchase_raw.get("quantity_per_product", 1)),
+                    fallback_quantity=(
+                        int(purchase_raw["fallback_quantity"])
+                        if purchase_raw.get("fallback_quantity") is not None else None
+                    ),
                     max_all_in_per_unit_cents=int(
                         purchase_raw.get("max_all_in_per_unit_cents", 0)
                     ),

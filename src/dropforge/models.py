@@ -136,12 +136,17 @@ class StandingPurchasePolicy:
     currency: str
     runner_path: str
     secret_file: str
+    fallback_quantity: int | None = None
 
     def validate(self) -> None:
         if not self.sizes or any(normalize(size) in {"", "any", "all"} for size in self.sizes):
             raise ValueError("purchase sizes must be explicit")
         if self.quantity_per_product < 1 or self.quantity_per_product > 10:
             raise ValueError("quantity_per_product must be between 1 and 10")
+        if self.fallback_quantity is not None and not (
+            1 <= self.fallback_quantity < self.quantity_per_product
+        ):
+            raise ValueError("fallback_quantity must be positive and less than quantity_per_product")
         if self.max_all_in_per_unit_cents <= 0:
             raise ValueError("max_all_in_per_unit_cents must be positive")
         if not re.fullmatch(r"[A-Z]{3}", self.currency):

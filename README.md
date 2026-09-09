@@ -130,8 +130,9 @@ sizes = ["8", "8.5", "9", "9.5", "10", "10.5"]
 max_unit_price_cents = 30000
 
 [drops.purchase]
-sizes = ["9", "9.5", "10", "8.5", "8", "10.5"]
+sizes = ["9.5", "10", "9", "8.5", "10.5", "8"]
 quantity_per_product = 3
+fallback_quantity = 1
 max_all_in_per_unit_cents = 30000
 currency = "USD"
 runner_path = "/absolute/path/to/guarded-runner"
@@ -139,8 +140,9 @@ secret_file = "/absolute/path/to/mode-0600-secret-file"
 ```
 
 The first available size in policy order is used. DropForge requests the
-configured quantity in one exact cart and never splits orders to evade retailer
-limits. The final checkout total must be no more than
+configured quantity in one exact cart. If checkout preparation rejects that
+quantity, `fallback_quantity` may make one smaller pre-payment attempt; it never
+retries after payment submission or an unknown result. The final checkout total must be no more than
 `quantity_per_product * max_all_in_per_unit_cents`. One product ID receives one
 durable claim across variants and restarts. CAPTCHA/3DS pauses for human
 takeover; an unknown submit result is reconcile-only.

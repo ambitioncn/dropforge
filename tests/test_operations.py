@@ -153,6 +153,7 @@ class OperationsConfigTests(unittest.TestCase):
             [drops.purchase]
             sizes = ["9", "9.5", "10", "8.5", "8", "10.5"]
             quantity_per_product = 3
+            fallback_quantity = 1
             max_all_in_per_unit_cents = 30000
             currency = "USD"
             runner_path = "/opt/dropbot"
@@ -160,6 +161,7 @@ class OperationsConfigTests(unittest.TestCase):
         """))
         loaded = load_config(path)
         self.assertEqual(loaded.drops[0].purchase.quantity_per_product, 3)
+        self.assertEqual(loaded.drops[0].purchase.fallback_quantity, 1)
         self.assertEqual(loaded.service.openclaw_notify_channel, "feishu")
 
 

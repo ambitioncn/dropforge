@@ -22,12 +22,13 @@ from dropforge.state import StateStore
 
 def policy() -> StandingPurchasePolicy:
     return StandingPurchasePolicy(
-        sizes=("9", "9.5", "10", "8.5", "8", "10.5"),
+        sizes=("9.5", "10", "9", "8.5", "10.5", "8"),
         quantity_per_product=3,
         max_all_in_per_unit_cents=30000,
         currency="USD",
         runner_path="/opt/dropbot",
         secret_file="/run/secrets/checkout",
+        fallback_quantity=1,
     )
 
 
@@ -67,22 +68,27 @@ def observation() -> Observation:
 
 
 class FakeRunner:
-    def __init__(self, root: Path, *, prepare=None, submit=None, reconcile=None):
+    def __init__(self, root: Path, *, prepare=None, prepare_results=None, submit=None, reconcile=None):
         self.root = root
         self.prepare_result = prepare or PurchaseRunResult("checkout_ready", "submit")
+        self.prepare_results = list(prepare_results or ())
         self.submit_result = submit or PurchaseRunResult("order_confirmed", order_reference="order-1")
         self.reconcile_result = reconcile or PurchaseRunResult("order_confirmed", order_reference="order-1")
         self.prepare_calls = 0
         self.submit_calls = 0
         self.reconcile_calls = 0
         self.selected = None
+        self.quantities = []
 
-    def intent_path(self, _target, candidate, size):
+    def intent_path(self, _target, candidate, size, quantity=None):
         self.selected = (candidate.variant.id, size)
+        self.quantities.append(quantity)
         return self.root / "intent.json"
 
     def prepare(self, _path):
         self.prepare_calls += 1
+        if self.prepare_results:
+            return self.prepare_results.pop(0)
         return self.prepare_result
 
     def submit(self, _path):
@@ -119,11 +125,42 @@ class AutoPurchaseTests(unittest.TestCase):
         coordinator = self.coordinator(runner)
         coordinator(observation())
         coordinator(observation())
-        self.assertEqual(runner.selected, ("v9", "9"))
+        self.assertEqual(runner.selected, ("v10", "10"))
         self.assertEqual(runner.prepare_calls, 1)
         self.assertEqual(runner.submit_calls, 1)
         self.assertEqual(self.events[0]["quantity"], 3)
         self.assertEqual(self.events[0]["status"], "order_confirmed")
+
+    def test_pre_payment_quantity_failure_falls_back_to_one_pair(self):
+        runner = FakeRunner(
+            self.root,
+            prepare_results=(
+                PurchaseRunResult("failed", "prepare"),
+                PurchaseRunResult("checkout_ready", "submit"),
+            ),
+        )
+        self.coordinator(runner)(observation())
+        self.assertEqual(runner.quantities, [3, 1])
+        self.assertEqual(runner.prepare_calls, 2)
+        self.assertEqual(runner.submit_calls, 1)
+        self.assertEqual(self.events[-1]["quantity"], 1)
+        self.assertEqual(self.events[-1]["status"], "order_confirmed")
+
+    def test_one_pair_manual_prepare_resumes_as_one_pair(self):
+        runner = FakeRunner(
+            self.root,
+            prepare_results=(
+                PurchaseRunResult("failed", "prepare"),
+                PurchaseRunResult("manual_auth_required", "prepare"),
+                PurchaseRunResult("checkout_ready", "submit"),
+            ),
+        )
+        coordinator = self.coordinator(runner)
+        coordinator(observation())
+        coordinator(observation())
+        self.assertEqual(runner.quantities, [3, 1, 1])
+        self.assertEqual(runner.submit_calls, 1)
+        self.assertEqual(self.events[-1]["quantity"], 1)
 
     def test_manual_prepare_resumes_but_notifies_only_on_state_change(self):
         runner = FakeRunner(
@@ -147,6 +184,7 @@ class AutoPurchaseTests(unittest.TestCase):
         coordinator(observation())
         self.assertEqual(runner.submit_calls, 1)
         self.assertEqual(runner.reconcile_calls, 1)
+        self.assertEqual(runner.quantities, [3, 3])
 
     def test_runner_exception_becomes_one_failure_event(self):
         class Broken(FakeRunner):
@@ -199,6 +237,7 @@ class DropbotRunnerTests(unittest.TestCase):
                 currency="USD",
                 runner_path=str(executable),
                 secret_file=str(secret),
+                fallback_quantity=1,
             )
             calls = []
 
@@ -214,6 +253,10 @@ class DropbotRunnerTests(unittest.TestCase):
             document = json.loads(path.read_text())
             self.assertEqual(document["quantity"], 3)
             self.assertEqual(document["max_total_cents"], 90000)
+            fallback_path = runner.intent_path(target(), item, "9", 1)
+            fallback_document = json.loads(fallback_path.read_text())
+            self.assertEqual(fallback_document["quantity"], 1)
+            self.assertEqual(fallback_document["max_total_cents"], 30000)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(runner.prepare(path).status, "checkout_ready")
             self.assertEqual(calls[0][0][0], str(executable))
